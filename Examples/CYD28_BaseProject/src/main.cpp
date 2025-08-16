@@ -25,17 +25,28 @@ String debugMessage = "";
 void displayNetworks();
 void drawPasswordInput();
 
+// Debug message persistence
+String lastDebugMessage = "";
+unsigned long debugMessageTime = 0;
+const unsigned long DEBUG_DISPLAY_TIME = 3000; // Show for 3 seconds
+
+void drawDebugMessage() {
+	if (lastDebugMessage.length() > 0 && (millis() - debugMessageTime < DEBUG_DISPLAY_TIME)) {
+		// Clear debug area
+		tft.fillRect(0, 0, 320, 12, TFT_BLACK);
+		// Draw debug message
+		tft.setTextColor(TFT_YELLOW);
+		tft.setTextSize(1);
+		tft.setCursor(2, 2);
+		tft.print(lastDebugMessage);
+	}
+}
+
 void debugPrint(String msg) {
 	Serial.println(msg);
-	debugMessage = msg;
-	
-	// Always show debug at very top, regardless of screen mode
-	tft.fillRect(0, 0, 320, 12, TFT_BLACK);
-	tft.setTextColor(TFT_YELLOW);
-	tft.setTextFont(1);
-	tft.setTextSize(1);
-	tft.setCursor(2, 2);
-	tft.print(msg);
+	lastDebugMessage = msg;
+	debugMessageTime = millis();
+	drawDebugMessage();
 }
 void drawConnectionStatus();
 
@@ -386,6 +397,7 @@ void displayNetworks() {
 void drawPasswordInput() {
 	// Clear screen
 	tft.fillScreen(TFT_BLACK);
+	drawDebugMessage(); // Redraw debug message first
 	
 	// Title
 	tft.setTextColor(TFT_WHITE);
