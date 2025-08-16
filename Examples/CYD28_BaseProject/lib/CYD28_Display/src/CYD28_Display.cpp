@@ -4,7 +4,7 @@
 // User_Setup.h in libs/TFT_eSPI
 
 // lvgl 
-#define LV_BUFFER_ROWS 20		// defines the lvgl pixel buffer size
+#define LV_BUFFER_ROWS 10		// defines the lvgl pixel buffer size
 
 static CYD28_Display *dispPtr;
 static lv_disp_draw_buf_t disp_buf;
@@ -36,12 +36,24 @@ void CYD28_Display::begin(CYD28_Display_rot_t rot)
 			height = CYD28_DISPLAY_VER_RES_MAX;
 	}
 
+	// Initialize backlight pin
+	pinMode(21, OUTPUT);
+	digitalWrite(21, HIGH);
+	delay(100);
+
 	tft.begin();
 	tft.setRotation(rot);
+	tft.fillScreen(TFT_WHITE);  // Test with white screen
+	delay(2000); // Wait 2 seconds
+	tft.fillScreen(TFT_BLACK);  // Clear screen to remove noise
 	tft.initDMA();
 	ts.begin();
     ts.setRotation(rot);
 	ts.setThreshold(300);
+	
+	// Debug: Test raw touch values
+	Serial.println("Touch initialized. Testing calibration...");
+	
 	oldPoint = ts.getPointScaled();
 	lv_init();
 
@@ -52,11 +64,14 @@ void CYD28_Display::begin(CYD28_Display_rot_t rot)
     disp_drv.flush_cb = disp_flush;
     disp_drv.draw_buf = &disp_buf;
     lv_disp_drv_register(&disp_drv);
+    
     // touchscreen
+    Serial.println("Registering touch input device...");
     lv_indev_drv_init(&indev_drv);
     indev_drv.type = LV_INDEV_TYPE_POINTER;
     indev_drv.read_cb = touch_read;
-    lv_indev_drv_register(&indev_drv);
+    lv_indev_t* indev = lv_indev_drv_register(&indev_drv);
+    Serial.printf("Touch device registered: %p\n", indev);
 }
 // ------------------------------------------------------------
 /**
@@ -86,6 +101,8 @@ void disp_flush(lv_disp_drv_t *disp, const lv_area_t *area, lv_color_t *color_p)
  */
 void touch_read(lv_indev_drv_t *drv, lv_indev_data_t *data)
 {
+    static bool was_touched = false;
+    
     if (dispPtr->ts.touched())
     {
         CYD28_TS_Point p = dispPtr->ts.getPointScaled();
@@ -94,13 +111,20 @@ void touch_read(lv_indev_drv_t *drv, lv_indev_data_t *data)
         data->point.y = p.y;
         dispPtr->oldPoint.x = p.x;
         dispPtr->oldPoint.y = p.y;
-        //log_i("X = %d, Y = %d", data->point.x, data->point.y);
+        if (!was_touched) {
+            Serial.printf("Touch: X=%d Y=%d State=PRESS\n", data->point.x, data->point.y);
+            was_touched = true;
+        }
     }
     else
     {
         data->state = LV_INDEV_STATE_REL;
         data->point.x = dispPtr->oldPoint.x;
         data->point.y = dispPtr->oldPoint.y;
+        if (was_touched) {
+            Serial.printf("Touch: X=%d Y=%d State=RELEASE\n", data->point.x, data->point.y);
+            was_touched = false;
+        }
     }
 }
 

@@ -1,11 +1,23 @@
 #include "gui.h"
-#include "CYD28_LDR.h"
-#include "CYD28_RGBled.h"
-#include "CYD28_audio.h"
-#include "CYD28_SD.h"
-#include <WiFiManager.h>
+#include "wifi_ui.h"
 
-extern WiFiManager wifiManager;
+// WiFi UI objects
+static lv_obj_t *wifi_list;
+static lv_obj_t *status_label;
+static lv_obj_t *password_ta;
+static lv_obj_t *connect_btn;
+static lv_obj_t *scan_btn;
+static lv_obj_t *keyboard;
+
+static int selected_network = -1;
+static lv_timer_t *status_timer;
+
+// Event handlers
+static void wifi_list_event_cb(lv_event_t * e);
+static void connect_btn_event_cb(lv_event_t * e);
+static void scan_btn_event_cb(lv_event_t * e);
+static void password_ta_event_cb(lv_event_t * e);
+static void status_timer_cb(lv_timer_t * timer);
 
 static lv_obj_t *screenMain;
 
@@ -64,374 +76,176 @@ void printSysInfo(char * buf);
 lv_timer_t *SYS_updateTimer; // used to periodically update the info page
 void SYS_updateTimer_cb(lv_timer_t *t);
 
-/**----------------------------------------------------------------
- * @brief Main gui init - builds all the interface
- */
 void gui_init(void)
 {
-	char buf[256];
-
-    screenMain = lv_obj_create(NULL);	// main screen object
-
-	tabview = lv_tabview_create(screenMain, LV_DIR_LEFT, 40);
-	tabAudio = lv_tabview_add_tab(tabview, "Audio");
-	//lv_obj_set_width(tabAudio, lv_obj_get_width(tabview) - 40);
-	tabSD = lv_tabview_add_tab(tabview, "SD");
-	tabLDR = lv_tabview_add_tab(tabview, "LDR");
-	tabRGB = lv_tabview_add_tab(tabview, "RGB");
-	tabSYS = lv_tabview_add_tab(tabview, "SYS");
-
-	lv_obj_t * tab_btns = lv_tabview_get_tab_btns(tabview);
-	lv_obj_set_style_border_side(tab_btns, LV_BORDER_SIDE_RIGHT, LV_PART_ITEMS | LV_STATE_CHECKED);
-	
-// ------------------ TAB AUDIO -----------------------------------------	
-    btnMatrix = lv_btnmatrix_create(tabAudio);
-    lv_btnmatrix_set_map(btnMatrix, btnLabels);
-    lv_obj_align(btnMatrix, LV_ALIGN_TOP_MID, 0, 0);
-    lv_obj_add_event_cb(btnMatrix, event_handler_btnsAudio, LV_EVENT_VALUE_CHANGED, NULL);
-	lv_obj_clear_flag(tabAudio, LV_OBJ_FLAG_SCROLLABLE);
-
-	volSlider = lv_slider_create(tabAudio);
-	lv_obj_set_size(volSlider, 200, 10);
-	lv_slider_set_range(volSlider, 0, 100);
-	lv_slider_set_value(volSlider, 100, LV_ANIM_OFF);
-	lv_obj_align_to(volSlider, btnMatrix, LV_ALIGN_OUT_BOTTOM_MID, 0, 10);
-    lv_obj_add_event_cb(volSlider, volSlider_event_cb, LV_EVENT_VALUE_CHANGED, NULL);
-
-    volSlider_label = lv_label_create(tabAudio);
-    lv_label_set_text_fmt(volSlider_label, "Volume %3d%%", audioGetVolumePerCent());
-    lv_obj_align_to(volSlider_label, volSlider, LV_ALIGN_OUT_BOTTOM_MID, 0, 1);
-
-	static lv_style_t style_indic;
-    lv_style_init(&style_indic);
-    lv_style_set_bg_opa(&style_indic, LV_OPA_COVER);
-    lv_style_set_bg_color(&style_indic, lv_palette_main(LV_PALETTE_GREEN));
-    lv_style_set_bg_grad_color(&style_indic, lv_palette_main(LV_PALETTE_RED));
-    lv_style_set_bg_grad_dir(&style_indic, LV_GRAD_DIR_HOR);
-
-    VUmeterR = lv_bar_create(tabAudio);
-    lv_obj_add_style(VUmeterR, &style_indic, LV_PART_INDICATOR);
-    lv_obj_set_size(VUmeterR, 150, 5);
-    lv_bar_set_range(VUmeterR, 0, 100);
-	lv_obj_align_to(VUmeterR, volSlider, LV_ALIGN_OUT_BOTTOM_MID, 0, 20);
-
-	VUmeterL = lv_bar_create(tabAudio);
-    lv_obj_add_style(VUmeterL, &style_indic, LV_PART_INDICATOR);
-    lv_obj_set_size(VUmeterL, 150, 5);
-    lv_bar_set_range(VUmeterL, 0, 100);
-	lv_obj_align_to(VUmeterL, VUmeterR, LV_ALIGN_OUT_BOTTOM_MID, 0, 5);
-
-	label_AudioStatus = lv_label_create(tabAudio);
-	lv_label_set_text_fmt(label_AudioStatus, "Press button to play");
-	lv_obj_align_to(label_AudioStatus, VUmeterL, LV_ALIGN_OUT_BOTTOM_MID, 0, 7);
-
-	VU_updateTimer = lv_timer_create(VU_updateTimer_cb, 60, &userData);
-	//lv_timer_pause(VU_updateTimer);
-
-// ------------------ TAB SD -----------------------------------------	
-	label_SD_ls = lv_label_create(tabSD);
-	lv_obj_align(label_SD_ls, LV_ALIGN_TOP_MID,0, 0);
-	lv_obj_set_size(label_SD_ls, lv_obj_get_width(tabSD), 150);
-	lv_obj_set_style_text_align(label_SD_ls, LV_TEXT_ALIGN_LEFT, 0);
-
-	lv_obj_set_style_pad_hor(label_SD_ls, 15, 0);
-	
-	sdcard.printStatus(buf);
-	lv_label_set_text_fmt(label_SD_ls, buf);
-
-	btns_SD = lv_btnmatrix_create(tabSD);
-    lv_btnmatrix_set_map(btns_SD, btnSDLabels);
-    lv_obj_align(btns_SD, LV_ALIGN_TOP_MID, 0, 0);
-    lv_obj_add_event_cb(btns_SD, event_handler_btnsSD, LV_EVENT_VALUE_CHANGED, NULL);	
-	lv_obj_align(btns_SD, LV_ALIGN_BOTTOM_MID,0, 0);
-	lv_obj_set_height(btns_SD, 50);
-	
-	lv_obj_set_style_pad_all(btns_SD, 5, LV_PART_ITEMS);
-	lv_obj_clear_flag(tabSD, LV_OBJ_FLAG_SCROLLABLE);
-
-// ------------------ TAB LDR ---------------------------------------
-	
-	LDR_chart = lv_chart_create(tabLDR);
-	lv_obj_set_height(LDR_chart, 150);
-	lv_chart_set_type(LDR_chart, LV_CHART_TYPE_LINE);
-	lv_chart_set_range(LDR_chart, LV_CHART_AXIS_PRIMARY_X, 0, 250);
-	lv_chart_set_range(LDR_chart, LV_CHART_AXIS_PRIMARY_Y, 0, 1023);
-	lv_chart_set_point_count(LDR_chart, 250);
-	lv_chart_set_div_line_count(LDR_chart, 4, 4);
-	lv_chart_set_update_mode(LDR_chart, LV_CHART_UPDATE_MODE_CIRCULAR);
-				
-	lv_obj_set_style_text_font(LDR_chart, &UbuntuCond11, LV_PART_TICKS);
-
-	LDR_series = lv_chart_add_series(LDR_chart, lv_palette_main(LV_PALETTE_RED), 
-										LV_CHART_AXIS_PRIMARY_Y);
-	LDR_label_txt = lv_label_create(tabLDR);
-	lv_obj_set_style_text_align(LDR_label_txt, LV_TEXT_ALIGN_LEFT, 0);
-	lv_label_set_text_fmt(LDR_label_txt, "ADC value: %3d",ldr.get());
-	lv_obj_align_to(LDR_label_txt, LDR_chart, LV_ALIGN_OUT_BOTTOM_LEFT, 0, 10);
-
-	LDR_label_thresTxt = lv_label_create(tabLDR);
-	lv_obj_set_style_text_align(LDR_label_thresTxt, LV_TEXT_ALIGN_RIGHT, 0);
-	lv_label_set_text_fmt(LDR_label_thresTxt, "Threshold: %3d", ldr.thresGet());
-	lv_obj_align_to(LDR_label_thresTxt, LDR_chart, LV_ALIGN_OUT_BOTTOM_RIGHT, 0, 10);
-
-	LDR_label_dark = lv_label_create(tabLDR);
-	lv_obj_set_style_text_font(LDR_label_dark, &UbuntuCond36, 0);
-	lv_label_set_text_static(LDR_label_dark, ldr.isDark() ? "Night" : "Day");
-	lv_obj_align_to(LDR_label_dark, LDR_chart, LV_ALIGN_OUT_BOTTOM_MID, 0, 30);
-
-	LDR_updateTimer = lv_timer_create(LDR_updateTimer_cb, 500, &userData);
-	lv_obj_clear_flag(tabLDR, LV_OBJ_FLAG_SCROLLABLE);
-
-// ------------------ TAB RGB ---------------------------------------
-	RGB_btns = lv_btnmatrix_create(tabRGB);
-    lv_btnmatrix_set_map(RGB_btns, RGB_btns_labels);
-    lv_obj_align(RGB_btns, LV_ALIGN_CENTER, 0, 0);
-    lv_obj_add_event_cb(RGB_btns, event_handler_btnsRGB, LV_EVENT_VALUE_CHANGED, NULL);
-	lv_obj_clear_flag(tabRGB, LV_OBJ_FLAG_SCROLLABLE);
-
-	#if defined(USE_I2S_DAC) && defined(BOARD_HAS_PSRAM)
-		static lv_obj_t *RGB_infoLabel = lv_label_create(tabRGB);
-		lv_label_set_text_static(RGB_infoLabel, "PSRAM MOD/I2S installed, RGB disabled!");
-		lv_obj_align(RGB_infoLabel, LV_ALIGN_TOP_MID,0,0);
-		lv_btnmatrix_set_btn_ctrl(RGB_btns, 0, LV_BTNMATRIX_CTRL_DISABLED);
-		lv_btnmatrix_set_btn_ctrl(RGB_btns, 1, LV_BTNMATRIX_CTRL_DISABLED);
-		lv_btnmatrix_set_btn_ctrl(RGB_btns, 2, LV_BTNMATRIX_CTRL_DISABLED);
-	#elif defined(USE_I2S_DAC)
-		static lv_obj_t *RGB_infoLabel = lv_label_create(tabRGB);
-		lv_label_set_text_static(RGB_infoLabel, "I2S MOD installed, R disabled!");
-		lv_obj_align(RGB_infoLabel, LV_ALIGN_TOP_MID,0,0);
-		lv_btnmatrix_set_btn_ctrl(RGB_btns, 0, LV_BTNMATRIX_CTRL_DISABLED);
-	#elif defined(BOARD_HAS_PSRAM)
-		static lv_obj_t *RGB_infoLabel = lv_label_create(tabRGB);
-		lv_label_set_text_static(RGB_infoLabel, "PSRAM MOD installed, G+B disabled!");
-		lv_obj_align(RGB_infoLabel, LV_ALIGN_TOP_MID,0,0);
-		lv_btnmatrix_set_btn_ctrl(RGB_btns, 1, LV_BTNMATRIX_CTRL_DISABLED);
-		lv_btnmatrix_set_btn_ctrl(RGB_btns, 2, LV_BTNMATRIX_CTRL_DISABLED);
-	#endif
-// ------------------ TAB SYS ---------------------------------------
-	label_sysinfo = lv_label_create(tabSYS);
-
-	lv_label_set_recolor(label_sysinfo, true); 
-	lv_obj_align(RGB_btns, LV_ALIGN_CENTER, 0, 0);
-	lv_obj_set_style_text_align(label_SD_ls, LV_TEXT_ALIGN_LEFT, 0);
-	printSysInfo(buf);
-	lv_label_set_text(label_sysinfo, buf);
-	SYS_updateTimer = lv_timer_create(SYS_updateTimer_cb, 2000, &userData);
-
-// ------------------ LOAD MAIN SCREEN ------------------------------------
-	
-	lv_tabview_set_act(tabview, 0, LV_ANIM_OFF);
+    Serial.println("GUI: Creating main screen...");
+    lv_obj_t *screenMain = lv_obj_create(NULL);
+    
+    Serial.println("GUI: Loading screen...");
     lv_scr_load(screenMain);
-} // --- END gui_init
 
-/** -----------------------------------------------
- * @brief event handler for the Audio tab button matrix
- * 
- * @param e 
- */
-static void event_handler_btnsAudio(lv_event_t * e)
-{
-	lv_obj_t * btnm = lv_event_get_target(e);
-	uint16_t idx = lv_btnmatrix_get_selected_btn(btnm);
-	const char * labelTxt = lv_btnmatrix_get_btn_text(btnm, idx);
+    // Title
+    Serial.println("GUI: Creating title...");
+    lv_obj_t *title = lv_label_create(screenMain);
+    lv_label_set_text(title, "WiFi Manager");
+    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 10);
+    Serial.println("GUI: Title created");
 
-	switch(idx)
-	{
-		case 0: 
-			audioConnecttoSD("/ninja.mp3"); 
-			//lv_timer_resume(VU_updateTimer);
-			break;
-		case 1: 
-			audioConnecttoSD("/guitar.mp3");
-			break;
-		case 2: 
-			audioConnecttoSD("/iw.mp3");
-			break;
-		case 3:
-			audioConnecttohost("https://github.com/schreibfaul1/ESP32-audioI2S/raw/master/additional_info/Testfiles/Miss-Marple.m4a");  
-			break;
-		case 4: 
-			audioConnecttohost("http://stream.radioparadise.com/flac"); 
-			break;
-		case 5: 
-			audioConnecttoSpeech("Welcome to cheap yellow display", "en"); break;
-			break;
-		case 6: 
-			audioConnecttoSpeech("Stock audio system, no mod installed", "en");   
-			break;
-		case 7: 
-			audioConnecttoSpeech("Audio modification installed", "en"); 
-			break;
-		case 8:
-			audioStopSong();  
-			break;
+    // Status label
+    Serial.println("GUI: Creating status label...");
+    status_label = lv_label_create(screenMain);
+    lv_label_set_text(status_label, "Status: Disconnected");
+    lv_obj_align(status_label, LV_ALIGN_TOP_LEFT, 10, 40);
 
-	}
-	Serial.printf("Button %d - %s was pressed\n", idx, labelTxt);
-}
-// ----------------------------------------------------------------------------
-void audio_eof_mp3(const char *info)
-{ // end of file
+    // Scan button
+    scan_btn = lv_btn_create(screenMain);
+    lv_obj_set_size(scan_btn, 80, 35);
+    lv_obj_align(scan_btn, LV_ALIGN_TOP_RIGHT, -10, 35);
+    lv_obj_add_event_cb(scan_btn, scan_btn_event_cb, LV_EVENT_CLICKED, NULL);
+    
+    lv_obj_t *scan_label = lv_label_create(scan_btn);
+    lv_label_set_text(scan_label, "SCAN");
+    lv_obj_center(scan_label);
 
-	Serial.print("eof_mp3     ");
-	Serial.println(info);
-}
-// ------------------------------------------------
+    // WiFi list
+    wifi_list = lv_list_create(screenMain);
+    lv_obj_set_size(wifi_list, 300, 140);
+    lv_obj_align(wifi_list, LV_ALIGN_TOP_MID, 0, 75);
 
-void audio_info(const char*s)
-{
-	Serial.printf("%s\r\n", s);
-}
+    // Password input
+    lv_obj_t *pwd_label = lv_label_create(screenMain);
+    lv_label_set_text(pwd_label, "Password:");
+    lv_obj_align(pwd_label, LV_ALIGN_BOTTOM_LEFT, 10, -80);
 
-/** -----------------------------------------------
- * @brief event handler for the Volume slider
- * 
- * @param e 
- */
-static void volSlider_event_cb(lv_event_t * e)
-{
-    lv_obj_t * slider = lv_event_get_target(e);
-    char buf[12];
-	uint32_t vol;
-	int32_t val = lv_slider_get_value(slider);
-    lv_snprintf(buf, sizeof(buf), "Volume %3d%%", val);
-    lv_label_set_text(volSlider_label, buf);
-	vol = (val * 21)/100;
-	audioSetVolume(vol);
-}
-/** -----------------------------------------------
- * @brief manually set the VU meters value, input value is 
- * 			u16_t u16_t
- *			 R     L 
- * @param vuRL 
- */
-void setVuMeters(uint32_t vuRL)
-{
-	uint8_t r = (vuRL >> 16) & 0xFF;
-	uint8_t l = vuRL  & 0xFF;
-	lv_bar_set_value(VUmeterR, r, LV_ANIM_OFF);
-	lv_bar_set_value(VUmeterL, l, LV_ANIM_OFF);
-}
-/** -----------------------------------------------
- * @brief event handler for the SD card refresh button
- * 
- * @param e 
- */
-static void event_handler_btnsSD(lv_event_t * e)
-{
-	lv_obj_t * btnm = lv_event_get_target(e);
-	uint16_t idx = lv_btnmatrix_get_selected_btn(btnm);
-	const char * labelTxt = lv_btnmatrix_get_btn_text(btnm, idx);
+    password_ta = lv_textarea_create(screenMain);
+    lv_obj_set_size(password_ta, 180, 35);
+    lv_obj_align(password_ta, LV_ALIGN_BOTTOM_LEFT, 10, -50);
+    lv_textarea_set_placeholder_text(password_ta, "Enter password");
+    lv_textarea_set_password_mode(password_ta, true);
+    lv_obj_add_event_cb(password_ta, password_ta_event_cb, LV_EVENT_CLICKED, NULL);
 
-	switch(idx)
-	{
-		case 0:
-			char buf[256];
-			sdcard.printStatus(buf); 
-			break;
+    // Connect button
+    connect_btn = lv_btn_create(screenMain);
+    lv_obj_set_size(connect_btn, 80, 35);
+    lv_obj_align(connect_btn, LV_ALIGN_BOTTOM_RIGHT, -10, -50);
+    lv_obj_add_event_cb(connect_btn, connect_btn_event_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_add_state(connect_btn, LV_STATE_DISABLED);
+    
+    lv_obj_t *connect_label = lv_label_create(connect_btn);
+    lv_label_set_text(connect_label, "CONNECT");
+    lv_obj_center(connect_label);
 
-	}
-	Serial.printf("SD tab: Button %d - %s was pressed\n", idx, labelTxt);	
+    // Create keyboard (initially hidden)
+    keyboard = lv_keyboard_create(screenMain);
+    lv_obj_set_size(keyboard, LV_HOR_RES, LV_VER_RES / 2);
+    lv_obj_add_flag(keyboard, LV_OBJ_FLAG_HIDDEN);
+
+    // Status update timer
+    status_timer = lv_timer_create(status_timer_cb, 1000, NULL);
+
+    // Load main screen
+    lv_scr_load(screenMain);
+    
+    // Force screen update
+    Serial.println("GUI: Forcing screen refresh...");
+    lv_refr_now(NULL);
+    Serial.println("GUI: Screen refresh complete");
+
+    // Initial scan
+    wifi_ui_scan();
+    update_wifi_list();
 }
 
-/** -----------------------------------------------
- * @brief LDR update timer callback.
- * 		Reads the LDR input value and passes it for the chart
- * @param t 
- */
-void LDR_updateTimer_cb(lv_timer_t *t)
+void update_wifi_list()
 {
-	if (lv_tabview_get_tab_act(tabview) != 2) return; // update only when tab is active
-    int32_t ldrValue = ldr.get();
-    bool dark, changed;
-    dark = ldr.isDark(&changed);    
-    lv_chart_set_next_value(LDR_chart, LDR_series, ldrValue);
-	lv_label_set_text_fmt(LDR_label_txt, "ADC value: %3d",ldrValue);
-    if (changed)
-    {
-        lv_label_set_text_fmt(LDR_label_dark, "%s", dark ? "Night":"Day");
-    } 
+    // Clear existing list
+    lv_obj_clean(wifi_list);
+    
+    int count = wifi_ui_get_network_count();
+    if (count == 0) {
+        lv_obj_t *btn = lv_list_add_btn(wifi_list, LV_SYMBOL_WIFI, "No networks found");
+        lv_obj_add_state(btn, LV_STATE_DISABLED);
+        return;
+    }
+    
+    for (int i = 0; i < count; i++) {
+        const char* ssid = wifi_ui_get_ssid(i);
+        int rssi = wifi_ui_get_rssi(i);
+        bool encrypted = wifi_ui_get_encrypted(i);
+        
+        char label[64];
+        const char* signal_icon = (rssi > -50) ? LV_SYMBOL_WIFI : 
+                                 (rssi > -70) ? "📶" : "📶";
+        const char* lock_icon = encrypted ? "🔒" : "";
+        
+        snprintf(label, sizeof(label), "%s %s %s (%ddBm)", 
+                signal_icon, lock_icon, ssid, rssi);
+        
+        lv_obj_t *btn = lv_list_add_btn(wifi_list, NULL, label);
+        lv_obj_add_event_cb(btn, wifi_list_event_cb, LV_EVENT_CLICKED, (void*)(intptr_t)i);
+    }
 }
 
-/** -----------------------------------------------
- * @brief event handler for the RGB led buttons (RGB tab)
- * 
- * @param e 
- */
-static void event_handler_btnsRGB(lv_event_t * e)
+static void wifi_list_event_cb(lv_event_t * e)
 {
-	lv_obj_t * btnm = lv_event_get_target(e);
-	uint16_t idx = lv_btnmatrix_get_selected_btn(btnm);
-	const char * labelTxt = lv_btnmatrix_get_btn_text(btnm, idx);
+    selected_network = (int)(intptr_t)lv_event_get_user_data(e);
+    
+    // Check if network needs password
+    bool encrypted = wifi_ui_get_encrypted(selected_network);
+    const char* ssid = wifi_ui_get_ssid(selected_network);
+    
+    // Try to load saved password
+    char saved_password[64] = {0};
+    bool has_saved = wifi_ui_load_credentials(ssid, saved_password, sizeof(saved_password));
+    
+    if (encrypted && !has_saved) {
+        // Show password input
+        lv_textarea_set_text(password_ta, "");
+        lv_obj_clear_state(connect_btn, LV_STATE_DISABLED);
+    } else {
+        // Connect directly (open network or saved password)
+        if (has_saved) {
+            lv_textarea_set_text(password_ta, saved_password);
+        } else {
+            lv_textarea_set_text(password_ta, "");
+        }
+        lv_obj_clear_state(connect_btn, LV_STATE_DISABLED);
+        
+        // Auto-connect if we have credentials or it's open
+        if (!encrypted || has_saved) {
+            wifi_ui_connect(ssid, has_saved ? saved_password : "");
+        }
+    }
+}
 
-	switch(idx)
-	{
-		case 0: 
-			led.redToggle();
-			break;
-		case 1: 
-			led.greenToggle();
-			break;
-		case 2: 
-			led.blueToggle();
-			break;
-		
-	}
-	Serial.printf("Button %d - %s was pressed\n", idx, labelTxt);	
-}
-/** -----------------------------------------------
- * @brief Print various system information
- * 
- * @param buf pointer to a 256 bytes long buffer 
- */
-void printSysInfo(char * buf)
+static void connect_btn_event_cb(lv_event_t * e)
 {
-	if (!buf) return;
-	esp_chip_info_t chip_info;
-    esp_chip_info(&chip_info);
-	snprintf(buf, 256, 	"#590a1b SYSTEM INFO:#\n\n"
-						"%d cores Wifi %s%s\n"
-						"Silicon revision: %d\n"
-						"%dMB %s flash\n"
-						"Total heap: %d\n"
-						"Free heap: %d\n"
-						"#12451b Total PSRAM:# %d\n"
-						"#12451b Free PSRAM:# %d\n"
-						"WiFi: %s mode: %s\n"
-						"IP: " IPSTR,
+    if (selected_network < 0) return;
+    
+    const char* ssid = wifi_ui_get_ssid(selected_network);
+    const char* password = lv_textarea_get_text(password_ta);
+    
+    wifi_ui_connect(ssid, password);
+}
 
-						chip_info.cores, (chip_info.features & CHIP_FEATURE_BT) ? "/BT" : "",
-    					(chip_info.features & CHIP_FEATURE_BLE) ? "/BLE" : "",
-						chip_info.revision,
-						spi_flash_get_chip_size()/(1024*1024),
-						(chip_info.features & CHIP_FEATURE_EMB_FLASH) ? "embeded" : "external",
-						ESP.getHeapSize(),
-						ESP.getFreeHeap(),
-						ESP.getPsramSize(),
-						ESP.getFreePsram(),
-						wifiManager.getWLStatusString(),
-						wifiManager.getModeString(WiFi.getMode()),
-						WiFi.localIP()[0], WiFi.localIP()[1], WiFi.localIP()[2], WiFi.localIP()[3]);
-}
-/** -----------------------------------------------
- * @brief periodically (2s) update sys info
- * 
- * @param t 
- */
-void SYS_updateTimer_cb(lv_timer_t *t)
+static void scan_btn_event_cb(lv_event_t * e)
 {
-	char buf[256];
-	printSysInfo(buf);
-	lv_label_set_text(label_sysinfo, buf);
+    Serial.println("SCAN button pressed!");
+    wifi_ui_scan();
+    update_wifi_list();
 }
-/** -----------------------------------------------
- * @brief Updating VU meters while playing audio
- * 
- * @param t 
- */
-void VU_updateTimer_cb(lv_timer_t *t)
+
+static void password_ta_event_cb(lv_event_t * e)
 {
-	if(lv_tabview_get_tab_act(tabview) != 0) return; // update only in audio tab
-	uint32_t vu = audioGetRMS();
-    setVuMeters(vu);
+    lv_keyboard_set_textarea(keyboard, password_ta);
+    lv_obj_clear_flag(keyboard, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void status_timer_cb(lv_timer_t * timer)
+{
+    String status = "Status: " + wifi_ui_get_status();
+    if (wifi_ui_is_connected()) {
+        status += " - IP: " + WiFi.localIP().toString();
+    }
+    lv_label_set_text(status_label, status.c_str());
 }

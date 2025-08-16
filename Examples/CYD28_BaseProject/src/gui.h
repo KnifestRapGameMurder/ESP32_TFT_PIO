@@ -5,5 +5,6 @@
 #include "../lvgl/src/lvgl.h"
 
 void gui_init(void);
+void update_wifi_list();
 
 #endif // _GUI_H
