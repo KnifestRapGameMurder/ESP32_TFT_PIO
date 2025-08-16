@@ -2,6 +2,9 @@
 #include "CYD28_SD.h"
 #include <SD.h>
 
+// Forward declaration for debug function
+extern void debugPrint(String msg);
+
 #define WIFI_CREDS_FILE "/wifi_creds.txt"
 #define MAX_NETWORKS 20
 
@@ -27,13 +30,13 @@ void wifi_ui_scan() {
     wifi_scanning = true;
     network_count = 0;
     
-    Serial.println("Scanning for WiFi networks...");
+    debugPrint("Scanning for WiFi networks...");
     int n = WiFi.scanNetworks();
     
     if (n == 0) {
-        Serial.println("No networks found");
+        debugPrint("No networks found");
     } else {
-        Serial.printf("Found %d networks\n", n);
+        debugPrint("Found " + String(n) + " networks");
         
         // Sort by signal strength and remove duplicates
         for (int i = 0; i < n && network_count < MAX_NETWORKS; i++) {
@@ -62,10 +65,22 @@ void wifi_ui_scan() {
             }
         }
         
-        // Sort by signal strength (strongest first)
+        // Sort: open networks first, then by signal strength
         for (int i = 0; i < network_count - 1; i++) {
             for (int j = i + 1; j < network_count; j++) {
-                if (networks[i].rssi < networks[j].rssi) {
+                bool swap = false;
+                
+                // Priority 1: Open networks first
+                if (networks[i].encrypted && !networks[j].encrypted) {
+                    swap = true;
+                } else if (networks[i].encrypted == networks[j].encrypted) {
+                    // Priority 2: Stronger signal
+                    if (networks[i].rssi < networks[j].rssi) {
+                        swap = true;
+                    }
+                }
+                
+                if (swap) {
                     WiFiNetwork temp = networks[i];
                     networks[i] = networks[j];
                     networks[j] = temp;
@@ -73,7 +88,7 @@ void wifi_ui_scan() {
             }
         }
         
-        Serial.printf("Processed %d unique networks\n", network_count);
+        debugPrint("Processed " + String(network_count) + " unique networks");
     }
     
     wifi_scanning = false;
@@ -119,11 +134,11 @@ void wifi_ui_connect(const char* ssid, const char* password) {
     }
     
     if (WiFi.status() == WL_CONNECTED) {
-        Serial.println("\nWiFi connected!");
+        debugPrint("WiFi connected!");
         Serial.printf("IP address: %s\n", WiFi.localIP().toString().c_str());
         wifi_ui_save_credentials(ssid, password);
     } else {
-        Serial.println("\nConnection failed!");
+        debugPrint("Connection failed!");
     }
 }
 
@@ -228,7 +243,7 @@ void wifi_ui_autoconnect() {
         return;
     }
     
-    Serial.println("Scanning for known networks...");
+    debugPrint("Scanning for known networks...");
     wifi_ui_scan();
     
     File file = SD.open(WIFI_CREDS_FILE, FILE_READ);
